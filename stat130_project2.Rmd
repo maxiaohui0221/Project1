@@ -1,0 +1,327 @@
+---
+title: "Stat130 Project 2"
+author: "Xiaohui Ma"
+date: "2024-11-17"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# Process the data
+
+```{r}
+#import the data
+p2_data <- read.csv("/Users/maxiaohui/Desktop/Stat130 project 2/sunroof.csv")
+
+#clean the data
+cleaned_data <- p2_data[p2_data$state_name != "NULL", ] # remove the row that contain the NULL value in state_name
+
+#summary of the data
+dim(cleaned_data)
+str(cleaned_data)
+
+```
+
+# Simple Random Sampling
+
+### Decide the sample size
+
+```{r}
+size_srs<-round(909 * 0.35)  #cleaned_data have 909 row and we sample 35% data of the population 
+size_srs
+```
+
+### Create an sample for SRS
+
+```{r}
+set.seed(1)
+inds = sample(1:nrow(cleaned_data), size_srs, replace = FALSE) 
+sample_srs = cleaned_data[inds, ]
+
+```
+
+### Calculation
+
+```{r}
+# estimating the total number of carbon offset by using srs
+N_srs = nrow(cleaned_data)  # population size
+y_bar = mean(sample_srs$carbon_offset_metric_tons) # sample mean
+total_srs <- N_srs * y_bar
+total_srs
+
+# calculate the standard error of estimator
+n_srs = 318    # sample size
+s2 <- (1/(n_srs-1))* sum((sample_srs$carbon_offset_metric_tons - y_bar)^2)  #sample variance 
+var_srs <- (N_srs^2)* (s2/n_srs)*(1-(n_srs/N_srs))   # variance of estimator
+se_srs <- sqrt(var_srs)
+se_srs
+
+#calculate the 95% confidence interval of real t
+lower_srs <- total_srs - qt(0.975, n_srs-1) * se_srs
+upper_srs <- total_srs + qt(0.975, n_srs-1) * se_srs
+CI_srs <- c(lower_srs, upper_srs)
+CI_srs
+
+```
+# Stratified sampling
+
+#### (separate the whole population into different stratums h base on states, then randomly sample several data from each stratums)
+
+### Decide the sample size by using proportional allocation
+
+```{r}
+Nh = table(cleaned_data$state_name)  #number of data in each stratum h
+state_proportions <- Nh/sum(Nh)
+nh = round(state_proportions * n_srs)  #number of data sampled from each stratum h
+n_str = sum(nh)  #total sample size
+```
+
+### Create an sample for Stratified sampling
+
+```{r}
+library(dplyr)
+
+set.seed(2)
+sample_str <- cleaned_data %>% 
+  group_by(state_name) %>%
+  group_modify(~ slice_sample(.x, n = nh[as.character(.y$state_name)]))
+```
+
+### summarize the sampled data
+
+```{r}
+summary_str <- sample_str %>%
+  group_by(state_name) %>%
+  summarise(
+    mean_carbon_offset = mean(carbon_offset_metric_tons),
+    total_carbon_offset = sum(carbon_offset_metric_tons),
+    nh = n()
+  )
+
+new_Nh <- Nh[names(Nh) != "Vermont"] # remove the state "Vermont" since sampled data doesn't contain it
+
+#calculate the population variance for each stratum. (We don't use sample variance here since some sample number in each strutum is only one)
+pop_sd <-cleaned_data %>% 
+  group_by(state_name) %>%
+  summarise(sd_value = sd(carbon_offset_metric_tons)) %>%
+  filter(!is.na(sd_value))
+
+# add Nh in the summary table
+summary_str$Nh <- new_Nh 
+
+# add sd of each strutum in the summary table
+summary_str$sd_carbon_offset <- pop_sd$sd_value  
+
+summary_str
+
+#Summary the Carbon offset of each Strata
+summary(summary_str$total_carbon_offset)
+
+```
+
+### Calculation
+
+```{r}
+# estimating the total number of carbon offset by using str
+total_str <- sum(summary_str$Nh * summary_str$mean_carbon_offset)
+total_str
+
+# calculate the standard error of estimator
+var_str <- sum((1-(summary_str$nh/summary_str$Nh))* (summary_str$Nh^2) * ((summary_str$sd_carbon_offset^2)/summary_str$nh)) #variance
+se_str = sqrt(var_str)
+se_str
+
+#calculate the 95% confidence interval of real t
+H = length(unique(sample_str$state_name))  #the number of strutum
+lower_str <- total_str - qt(0.975, n_str-H) * se_str
+upper_str <- total_str + qt(0.975, n_str-H) * se_str
+CI_str <- c(lower_str, upper_str)
+CI_str
+```
+
+### Create a side-by-side boxplot
+
+```{r}
+boxplot(carbon_offset_metric_tons ~ state_name, 
+        data = sample_str, 
+        col = rainbow(length(unique(sample_str$state_name))), 
+        main = "Carbon offset across states",
+        xlab = "States",
+        ylab = "Carbon offest (in tons)", 
+        las = 2,                
+        cex.axis = 0.8,
+        cex.lab = 1.2, 
+        notch = FALSE,           
+        outline = FALSE )
+```
+
+# One-stage cluster sampling
+
+#### (separate the whole population into different cluster base on states. First, randomly pick several cluster and then sample all value in each selected cluster.)
+
+### Decide the sample size
+
+```{r}
+N_1c = length(unique(cleaned_data$state_name))      #total number of clusters in the population
+n_1c = 17         #total number of sampled clusters
+```
+
+### Create an sample for One-stage cluster sampling
+
+```{r}
+states = labels(table(cleaned_data$state_name))[[1]] # 50 clusters
+set.seed(3)
+states_sample = sample(states, size = 17, replace = F)
+sample1_clus = cleaned_data[cleaned_data$state_name %in% states_sample, ]
+
+Mi_1c = table(sample1_clus$state_name) # Mi = mi = the number of all data in each sampled cluster
+```
+
+### summarize the sampled data
+
+```{r}
+summary_1clus <- sample1_clus %>%
+  group_by(state_name) %>%
+  summarise(
+    total_carbon_offset = sum(carbon_offset_metric_tons),
+    mean_carbon_offset = mean(carbon_offset_metric_tons)
+  )
+
+summary_1clus$Mi <- Mi_1c
+summary_1clus
+
+#Summary the Carbon offset of each cluster
+summary(summary_1clus$total_carbon_offset)
+```
+
+### Calculation
+
+```{r}
+# estimating the total number of carbon offset by using one-stage cluster sampling method
+total_1clus <-(N_1c/n_1c) * sum(summary_1clus$total_carbon_offset)
+total_1clus
+
+# calculate the standard error of estimator
+st2_1clus <- (1/(n_1c - 1)) * sum((summary_1clus$total_carbon_offset - total_1clus)^2)
+var_1clus = (N_1c)^2 * (1-(n_1c/N_1c)) * (st2_1clus/n_1c)
+se_1clus = sqrt(var_1clus)
+se_1clus
+
+#calculate the 95% confidence interval of real t
+lower_1clus <- total_1clus - qt(0.975, n_1c - 1) * se_1clus
+upper_1clus <- total_1clus + qt(0.975, n_1c - 1) * se_1clus
+CI_1clus <- c(lower_1clus, upper_1clus)
+CI_1clus
+
+```
+
+### Create a side-by-side boxplot
+
+```{r}
+boxplot(carbon_offset_metric_tons ~ state_name, 
+        data = sample1_clus, 
+        col = rainbow(length(unique(sample1_clus$state_name))), 
+        main = "Carbon offset across states",
+        xlab = "States",
+        ylab = "Carbon offest (in tons)", 
+        las = 2,                
+        cex.axis = 0.8,
+        cex.lab = 1.2, 
+        notch = FALSE,           
+        outline = FALSE )
+```
+
+# Two-stage cluster sample
+
+#### （separate the whole population into different cluster base on states. First, randomly pick several cluster and then randomly sample several data from the selected cluster again.）
+
+### Decide the sample size
+
+```{r}
+N_2c = length(unique(cleaned_data$state_name))       #total number of clusters in the population
+n_2c = 27        #total number of sampled clusters
+```
+
+### Create an sample for two-stage cluster sampling
+
+```{r}
+states = labels(table(cleaned_data$state_name))[[1]] # 50 clusters
+set.seed(4)
+states_sample2 = sample(states, size = 27, replace = F)  
+sampled_cluster = cleaned_data[cleaned_data$state_name %in% states_sample2, ]
+
+
+sample2_clus <- sampled_cluster %>%
+  group_by(state_name) %>%
+  sample_frac(size = 0.65)  #sample 65% of data in each sampled cluster
+sample2_clus
+
+Mi_2c = table(sampled_cluster$state_name) # the number of all data in each sampled cluster
+
+mi <- sample2_clus %>%    # number of data sampled from each Mi
+  group_by(state_name) %>%
+  summarise(mi = n())
+```
+
+### summarize the sampled data
+
+```{r}
+summary_2clus <- sample2_clus %>%
+  group_by(state_name) %>%
+  summarise(
+    total_carbon_offset = sum(carbon_offset_metric_tons),
+    mean_carbon_offset = mean(carbon_offset_metric_tons), 
+    si2 = var(carbon_offset_metric_tons)
+  )
+
+summary_2clus$Mi <- Mi_2c
+summary_2clus$mi <- mi$mi
+
+  
+summary_2clus <- na.omit(summary_2clus) #remove the row contain NA
+summary_2clus
+
+
+
+#Summary the Carbon offset of each cluster
+summary(summary_2clus$total_carbon_offset)
+
+```
+
+### Calculation
+
+```{r}
+# estimating the total number of carbon offset by using two-stage cluster sampling method
+total_2clus = (N_2c/n_2c) * sum(summary_2clus$Mi * summary_2clus$mean_carbon_offset)
+total_2clus
+
+# calculate the standard error of estimator
+st2_2clus = (1/(n_2c-1)) * sum((summary_2clus$total_carbon_offset - (total_2clus/N_2c))^2)
+var_2clus = (N_2c^2) * (1-(n_2c/N_2c)) * (st2_2clus/n_2c) + (N_2c/n_2c) * sum((1-(summary_2clus$mi/summary_2clus$Mi)) * (summary_2clus$Mi^2) *(summary_2clus$si2)/summary_2clus$mi)
+se_2clus = sqrt(var_2clus)
+se_2clus
+
+#calculate the 95% confidence interval of real t
+lower_2clus <- total_2clus - qt(0.975, n_2c - 1) * se_2clus
+upper_2clus <- total_2clus + qt(0.975, n_2c - 1) * se_2clus
+CI_2clus <- c(lower_2clus, upper_2clus)
+CI_2clus
+
+
+```
+
+### Create a side-by-side boxplot
+
+```{r}
+boxplot(carbon_offset_metric_tons ~ state_name, 
+        data = sample2_clus, 
+        col = rainbow(length(unique(sample2_clus$state_name))), 
+        main = "Carbon offset across states",
+        xlab = "States",
+        ylab = "Carbon offest (in tons)", 
+        las = 2,                
+        cex.axis = 0.8,
+        cex.lab = 1.2, 
+        notch = FALSE,           
+        outline = FALSE )
+```
